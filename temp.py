@@ -29,7 +29,7 @@ from detectron2.data import build_detection_test_loader
 
 
 def get_my_dataset_dicts(img_dir,annotations_filename):
-	json_file = annotations_filename
+	json_file = os.path.join(img_dir, annotations_filename)
 	with open(json_file) as f:
 		imgs_anns = json.load(f)
 
