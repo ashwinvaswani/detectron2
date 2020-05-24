@@ -6,7 +6,7 @@ setup_logger()
 import numpy as np
 import cv2
 import random
-# from google.colab.patches import cv2_imshow
+from google.colab.patches import cv2_imshow
 
 # import some common detectron2 utilities
 from detectron2 import model_zoo
@@ -22,6 +22,7 @@ from detectron2.data import DatasetCatalog, MetadataCatalog
 from detectron2.engine import DefaultTrainer
 from detectron2.config import get_cfg
 from detectron2.data.datasets import register_coco_instances
+from detectron2.utils.visualizer import ColorMode
 
 
 
@@ -105,9 +106,9 @@ class Detector:
 			img = cv2.imread(d["file_name"])
 			visualizer = Visualizer(img[:, :, ::-1], metadata=self.balloon_metadata, scale=0.5)
 			vis = visualizer.draw_dataset_dict(d)
-			cv2.imshow("main",vis.get_image()[:, :, ::-1])
-			cv2.waitKey(0)
-			cv2.destroyAllWindows()
+			cv2_imshow(vis.get_image()[:, :, ::-1])
+			# cv2.waitKey(0)
+			# cv2.destroyAllWindows()
 
 
 	def train(self):
@@ -132,4 +133,27 @@ class Detector:
 		trainer.train()
 
 
-		return trainer
+		return cfg, trainer
+
+	def infer(self,cfg):
+		cfg.MODEL.WEIGHTS = os.path.join(cfg.OUTPUT_DIR, "model_final.pth")
+		cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.7   # set the testing threshold for this model
+		cfg.DATASETS.TEST = ("balloon_val", )
+		predictor = DefaultTrainerltPredictor(cfg)
+
+		dataset_dicts = get_balloon_dicts("balloon/val")
+		for d in random.sample(dataset_dicts, 3):    
+		    im = cv2.imread(d["file_name"])
+		    outputs = predictor(im)
+		    v = Visualizer(im[:, :, ::-1],
+		                   metadata=self.balloon_metadata, 
+		                   scale=0.8, 
+		                   instance_mode=ColorMode.IMAGE_BW   # remove the colors of unsegmented pixels
+		    )
+		    v = v.draw_instance_predictions(outputs["instances"].to("cpu"))
+		    cv2_imshow(v.get_image()[:, :, ::-1])
+
+	def get_eval_score(self,cfg,trainer):
+		evaluator = COCOEvaluator("balloon_val", cfg, False, output_dir="./output/")
+		val_loader = build_detection_test_loader(cfg, "balloon_val")
+		inference_on_dataset(trainer.model, val_loader, evaluator)
