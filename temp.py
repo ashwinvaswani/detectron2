@@ -28,8 +28,8 @@ from detectron2.evaluation import COCOEvaluator, inference_on_dataset
 from detectron2.data import build_detection_test_loader
 
 
-def get_balloon_dicts(img_dir,annotations_filename):
-	json_file = os.path.join(img_dir, annotations_filename)
+def get_my_dataset_dicts(img_dir,annotations_filename):
+	json_file = annotations_filename
 	with open(json_file) as f:
 		imgs_anns = json.load(f)
 
@@ -71,38 +71,41 @@ class Detector:
 
 	def __init__(self):
 		self.dataset_dicts = None
-		self.balloon_metadata = None
+		self.my_dataset_metadata = None
 		self.cfg = None
 		self.trainer = None
 
 	def get_dataset(self,
 					coco=False,
-					PATH_TO_TRAIN="balloon/train",
-					NAME_TRAIN_JSON="via_region_data.json",
-					PATH_TO_VAL="balloon/val",
-					NAME_VAL_JSON="via_region_data.json",
-					list_of_classes=["balloon"]
+					PATH_TO_TRAIN=None,
+					NAME_TRAIN_JSON=None,
+					PATH_TO_VAL=None,
+					NAME_VAL_JSON=None,
+					list_of_classes=None
 					):
 
 		if coco == True:
 			register_coco_instances("my_dataset_train", {}, NAME_TRAIN_JSON, PATH_TO_TRAIN)
-			register_coco_instances("my_dataset_val", {}, NAME_VAL_JSON, PATH_TO_VAL)
+			if PATH_TO_VAL is not None:
+				register_coco_instances("my_dataset_val", {}, NAME_VAL_JSON, PATH_TO_VAL)
+			self.dataset_dicts = DatasetCatalog.get("my_dataset_train")
+			self.my_dataset_metadata = MetadataCatalog.get("my_dataset_train")
 		else:
 
 			for d in ["train", "val"]:
-				DatasetCatalog.register("balloon_" + d, lambda d=d: get_balloon_dicts("balloon/" + d,"via_region_data.json"))
-				MetadataCatalog.get("balloon_" + d).set(thing_classes=list_of_classes)
-			self.balloon_metadata = MetadataCatalog.get("balloon_train")
-			self.dataset_dicts = get_balloon_dicts(PATH_TO_TRAIN,"via_region_data.json")
-
-		# register_coco_instances("my_dataset_train", {}, NAME_TRAIN_JSON, PATH_TO_TRAIN)
-		# register_coco_instances("my_dataset_val", {}, NAME_VAL_JSON, PATH_TO_VAL)
-
+				if d == "train":
+					DatasetCatalog.register("my_dataset_" + d, lambda d=d: get_my_dataset_dicts(PATH_TO_TRAIN,NAME_TRAIN_JSON))
+					MetadataCatalog.get("my_dataset_" + d).set(thing_classes=list_of_classes)
+				else:
+					DatasetCatalog.register("my_dataset_" + d, lambda d=d: get_my_dataset_dicts(PATH_TO_VAL,NAME_VAL_JSON))
+					MetadataCatalog.get("my_dataset_" + d).set(thing_classes=list_of_classes)
+			self.my_dataset_metadata = MetadataCatalog.get("my_dataset_train")
+			self.dataset_dicts = get_my_dataset_dicts(PATH_TO_TRAIN,NAME_TRAIN_JSON)
 
 	def visualise(self):
 		for d in random.sample(self.dataset_dicts, 3):
 			img = cv2.imread(d["file_name"])
-			visualizer = Visualizer(img[:, :, ::-1], metadata=self.balloon_metadata, scale=0.5)
+			visualizer = Visualizer(img[:, :, ::-1], metadata=self.my_dataset_metadata, scale=0.5)
 			vis = visualizer.draw_dataset_dict(d)
 			cv2_imshow(vis.get_image()[:, :, ::-1])
 			# cv2.waitKey(0)
@@ -119,7 +122,7 @@ class Detector:
 						 ):
 		self.cfg = get_cfg()
 		self.cfg.merge_from_file(model_zoo.get_config_file(WEIGHTS_PATH))
-		self.cfg.DATASETS.TRAIN = ("balloon_train",)
+		self.cfg.DATASETS.TRAIN = ("my_dataset_train",)
 		self.cfg.DATASETS.TEST = ()
 		self.cfg.DATALOADER.NUM_WORKERS = NUM_WORKERS
 		self.cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url(WEIGHTS_PATH)  # Let training initialize from model zoo
@@ -139,21 +142,21 @@ class Detector:
 	def infer(self,img_path):
 		self.cfg.MODEL.WEIGHTS = os.path.join(self.cfg.OUTPUT_DIR, "model_final.pth")
 		self.cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.7   # set the testing threshold for this model
-		self.cfg.DATASETS.TEST = ("balloon_val", )
+		self.cfg.DATASETS.TEST = ("my_dataset_val", )
 		predictor = DefaultPredictor(self.cfg)
 
 		
 		im = cv2.imread(img_path)
 		outputs = predictor(im)
 		v = Visualizer(im[:, :, ::-1],
-		                   metadata=self.balloon_metadata, 
-		                   scale=0.8, 
-		                   instance_mode=ColorMode.IMAGE_BW   # remove the colors of unsegmented pixels
-		    )
+						   metadata=self.my_dataset_metadata, 
+						   scale=0.8, 
+						   instance_mode=ColorMode.IMAGE_BW   # remove the colors of unsegmented pixels
+			)
 		v = v.draw_instance_predictions(outputs["instances"].to("cpu"))
 		cv2_imshow(v.get_image()[:, :, ::-1])
 
 	def get_eval_score(self):
-		evaluator = COCOEvaluator("balloon_val", self.cfg, False, output_dir="./output/")
-		val_loader = build_detection_test_loader(self.cfg, "balloon_val")
+		evaluator = COCOEvaluator("my_dataset_val", self.cfg, False, output_dir="./output/")
+		val_loader = build_detection_test_loader(self.cfg, "my_dataset_val")
 		inference_on_dataset(self.trainer.model, val_loader, evaluator)
